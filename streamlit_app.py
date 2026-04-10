@@ -452,24 +452,24 @@ for week in weeks:
         day_events = event_map.get(day, [])
 
        for event in day_events[:3]:
-    status = str(event.get("status", "unknown")).strip().lower()
-    if status not in ["past", "confirmed", "predicted", "planned"]:
-        status = "unknown"
+        status = str(event.get("status", "unknown")).strip().lower()
+        if status not in ["past", "confirmed", "predicted", "planned"]:
+            status = "unknown"
 
-    company = html.escape(str(event.get("company", "")))
-    fiscal_period = html.escape(str(event.get("fiscal_period", "")))
-    source = html.escape(str(event.get("source", "")))
-    confidence = html.escape(str(event.get("prediction_confidence", "")))
+        company = html.escape(str(event.get("company", "")))
+        fiscal_period = html.escape(str(event.get("fiscal_period", "")))
+        source = html.escape(str(event.get("source", "")))
+        confidence = html.escape(str(event.get("prediction_confidence", "")))
 
-    confidence_text = f" ({confidence})" if confidence else ""
+        confidence_text = f" ({confidence})" if confidence else ""
 
-    html += (
-        f'<div class="event-box {status}">'
-        f'<div><strong>{company}</strong></div>'
-        f'<div>{fiscal_period}</div>'
-        f'<div class="event-meta">{source}{confidence_text}</div>'
-        f'</div>'
-    )
+        html += (
+            f'<div class="event-box {status}">'
+            f'<div><strong>{company}</strong></div>'
+            f'<div>{fiscal_period}</div>'
+            f'<div class="event-meta">{source}{confidence_text}</div>'
+            f'</div>'
+        )
 
         if len(day_events) > 3:
             html += f'<div style="font-size:12px;color:#4b5563;">+{len(day_events)-3} more</div>'
