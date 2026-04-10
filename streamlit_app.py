@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import calendar
 import re
-from datetime import date, timedelta
+import html as html_lib
+from datetime import date
 from pathlib import Path
 
 st.set_page_config(page_title="Earnings Calendar", layout="wide")
@@ -19,7 +20,7 @@ PREDICT_END_YEAR = 2028
 def load_data():
     df = pd.read_csv(CSV_PATH)
 
-    df.columns = df.columns.str.strip().str.replace('\ufeff', '', regex=False)
+    df.columns = df.columns.str.strip().str.replace("\ufeff", "", regex=False)
 
     required_cols = ["company", "fiscal_period", "announcement_date", "status", "source"]
     missing_cols = [c for c in required_cols if c not in df.columns]
@@ -58,10 +59,10 @@ def extract_quarter(fiscal_period: str):
         r"\bQUARTER\s*([1-4])\b",
     ]
 
-    for p in patterns:
-        m = re.search(p, text)
-        if m:
-            return f"Q{m.group(1)}"
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return f"Q{match.group(1)}"
 
     if "FY" in text or "FULL YEAR" in text:
         return "Q4"
@@ -72,9 +73,9 @@ def extract_quarter(fiscal_period: str):
 def extract_fiscal_year(fiscal_period: str, announcement_date: pd.Timestamp):
     text = str(fiscal_period).upper().strip()
 
-    m = re.search(r"(20\d{2})", text)
-    if m:
-        return int(m.group(1))
+    match = re.search(r"(20\d{2})", text)
+    if match:
+        return int(match.group(1))
 
     quarter = extract_quarter(text)
     if quarter is None:
@@ -84,12 +85,10 @@ def extract_fiscal_year(fiscal_period: str, announcement_date: pd.Timestamp):
     ann_month = announcement_date.month
 
     if quarter == "Q4":
-        # 보통 Q4/FY는 다음 해 초에 발표되므로
         if ann_month in [1, 2, 3]:
             return ann_year - 1
         return ann_year
 
-    # Q1/Q2/Q3는 보통 해당 연도 발표
     return ann_year
 
 
@@ -106,7 +105,6 @@ def get_period_end(fiscal_year: int, quarter: str):
 
 
 def adjust_to_business_day(ts: pd.Timestamp):
-    # 토요일이면 금요일, 일요일이면 월요일로 보정
     if ts.weekday() == 5:
         return ts - pd.Timedelta(days=1)
     if ts.weekday() == 6:
@@ -148,8 +146,7 @@ def get_actual_history(df_base, company, quarter, before_fiscal_year):
         (df_base["status_norm"] == "actual")
     ].copy()
 
-    hist = hist.sort_values("fiscal_year")
-    return hist
+    return hist.sort_values("fiscal_year")
 
 
 def get_peer_history(df_base, company, quarter, before_fiscal_year):
@@ -160,8 +157,7 @@ def get_peer_history(df_base, company, quarter, before_fiscal_year):
         (df_base["status_norm"] == "actual")
     ].copy()
 
-    peer = peer.sort_values("fiscal_year")
-    return peer
+    return peer.sort_values("fiscal_year")
 
 
 def default_lag_by_quarter(quarter):
@@ -184,40 +180,27 @@ def predict_lag(df_base, company, quarter, target_fiscal_year):
     if len(actual_lags) >= 3:
         recent = actual_lags[-3:]
         predicted_lag = round(weighted_average(recent, [0.2, 0.3, 0.5]))
-        confidence = "High"
-        basis = "last_3_actuals_weighted"
-        return predicted_lag, confidence, basis
+        return predicted_lag, "High", "last_3_actuals_weighted"
 
     if len(actual_lags) == 2:
         recent = actual_lags[-2:]
         predicted_lag = round(weighted_average(recent, [0.4, 0.6]))
-        confidence = "Mid"
-        basis = "last_2_actuals_weighted"
-        return predicted_lag, confidence, basis
+        return predicted_lag, "Mid", "last_2_actuals_weighted"
 
     if len(actual_lags) == 1:
         company_lag = actual_lags[-1]
         if len(peer_lags) > 0:
             peer_avg = round(sum(peer_lags) / len(peer_lags))
             predicted_lag = round(company_lag * 0.7 + peer_avg * 0.3)
-            confidence = "Low"
-            basis = "1_actual_plus_peer_avg"
-        else:
-            predicted_lag = company_lag
-            confidence = "Low"
-            basis = "1_actual_only"
-        return predicted_lag, confidence, basis
+            return predicted_lag, "Low", "1_actual_plus_peer_avg"
+        return company_lag, "Low", "1_actual_only"
 
     if len(peer_lags) > 0:
         predicted_lag = round(sum(peer_lags) / len(peer_lags))
-        confidence = "Low"
-        basis = "peer_avg_only"
-        return predicted_lag, confidence, basis
+        return predicted_lag, "Low", "peer_avg_only"
 
     predicted_lag = default_lag_by_quarter(quarter)
-    confidence = "Low"
-    basis = "default_quarter_lag"
-    return predicted_lag, confidence, basis
+    return predicted_lag, "Low", "default_quarter_lag"
 
 
 def format_predicted_fiscal_period(fiscal_year, quarter):
@@ -231,16 +214,10 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
     quarters = ["Q1", "Q2", "Q3", "Q4"]
 
     existing_keys = set(
-        zip(
-            df_base["company"],
-            df_base["quarter"],
-            df_base["fiscal_year"]
-        )
+        zip(df_base["company"], df_base["quarter"], df_base["fiscal_year"])
     )
 
     prediction_rows = []
-
-    # 동적 갱신 위해 연도 순서대로 생성하고, 생성 결과도 다음 연도 예측에 참고 가능하게 base에 붙여나감
     working_base = df_base.copy()
 
     for fiscal_year in range(start_year, end_year + 1):
@@ -250,7 +227,6 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
             for quarter in quarters:
                 key = (company, quarter, fiscal_year)
 
-                # 이미 actual/confirmed/predicted 뭐든 있으면 생성 안 함
                 if key in existing_keys:
                     continue
 
@@ -285,34 +261,33 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
             working_base = pd.concat([working_base, year_df], ignore_index=True)
 
     if prediction_rows:
-        predicted_df = pd.concat(prediction_rows, ignore_index=True)
-    else:
-        predicted_df = pd.DataFrame(columns=[
-            "company", "fiscal_period", "announcement_date", "status", "source",
-            "prediction_confidence", "prediction_basis"
-        ])
+        return pd.concat(prediction_rows, ignore_index=True)
 
-    return predicted_df
+    return pd.DataFrame(columns=[
+        "company", "fiscal_period", "announcement_date", "status", "source",
+        "prediction_confidence", "prediction_basis"
+    ])
 
 
 df_raw = load_data()
 predicted_df = generate_predictions(df_raw, PREDICT_START_YEAR, PREDICT_END_YEAR)
 
-display_df = pd.concat(
-    [
-        df_raw.copy(),
-        predicted_df[["company", "fiscal_period", "announcement_date", "status", "source",
-                      "prediction_confidence", "prediction_basis"]].copy()
-        if not predicted_df.empty else pd.DataFrame()
-    ],
-    ignore_index=True
-)
+if not predicted_df.empty:
+    display_df = pd.concat(
+        [
+            df_raw.copy(),
+            predicted_df[[
+                "company", "fiscal_period", "announcement_date", "status", "source",
+                "prediction_confidence", "prediction_basis"
+            ]].copy()
+        ],
+        ignore_index=True
+    )
+else:
+    display_df = df_raw.copy()
 
 display_df["announcement_date"] = pd.to_datetime(display_df["announcement_date"], errors="coerce")
 
-# -----------------------------
-# Sidebar
-# -----------------------------
 today = date.today()
 
 year_options = list(range(2018, PREDICT_END_YEAR + 1))
@@ -345,17 +320,11 @@ filtered = filtered[
     (filtered["announcement_date"].dt.month == month)
 ].copy()
 
-# -----------------------------
-# 날짜별 이벤트 묶기
-# -----------------------------
 event_map = {}
 for _, row in filtered.iterrows():
     d = row["announcement_date"].date()
     event_map.setdefault(d, []).append(row.to_dict())
 
-# -----------------------------
-# Style
-# -----------------------------
 st.markdown("""
 <style>
 .calendar-wrap {
@@ -418,27 +387,19 @@ st.markdown("""
     font-size: 11px;
     opacity: 0.9;
 }
-.small-note {
-    font-size: 11px;
-    color: #6b7280;
-    margin-top: 2px;
-}
 </style>
 """, unsafe_allow_html=True)
 
-# -----------------------------
-# 달력 렌더링
-# -----------------------------
 st.subheader(f"{year}-{month:02d}")
 
 cal = calendar.Calendar(firstweekday=0)
 weeks = cal.monthdatescalendar(year, month)
 weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-html = '<div class="calendar-wrap"><div class="calendar-grid">'
+calendar_html = '<div class="calendar-wrap"><div class="calendar-grid">'
 
 for wd in weekdays:
-    html += f'<div class="calendar-header">{wd}</div>'
+    calendar_html += f'<div class="calendar-header">{wd}</div>'
 
 for week in weeks:
     for day in week:
@@ -446,43 +407,40 @@ for week in weeks:
         if day.month != month:
             classes += " other-month"
 
-        html += f'<div class="{classes}">'
-        html += f'<div class="day-number">{day.day}</div>'
+        calendar_html += f'<div class="{classes}">'
+        calendar_html += f'<div class="day-number">{day.day}</div>'
 
         day_events = event_map.get(day, [])
 
-       for event in day_events[:3]:
-        status = str(event.get("status", "unknown")).strip().lower()
-        if status not in ["past", "confirmed", "predicted", "planned"]:
-            status = "unknown"
+        for event in day_events[:3]:
+            status = str(event.get("status", "unknown")).strip().lower()
+            if status not in ["past", "confirmed", "predicted", "planned"]:
+                status = "unknown"
 
-        company = html.escape(str(event.get("company", "")))
-        fiscal_period = html.escape(str(event.get("fiscal_period", "")))
-        source = html.escape(str(event.get("source", "")))
-        confidence = html.escape(str(event.get("prediction_confidence", "")))
+            company = html_lib.escape(str(event.get("company", "")))
+            fiscal_period = html_lib.escape(str(event.get("fiscal_period", "")))
+            source = html_lib.escape(str(event.get("source", "")))
+            confidence = html_lib.escape(str(event.get("prediction_confidence", "")))
 
-        confidence_text = f" ({confidence})" if confidence else ""
+            confidence_text = f" ({confidence})" if confidence else ""
 
-        html += (
-            f'<div class="event-box {status}">'
-            f'<div><strong>{company}</strong></div>'
-            f'<div>{fiscal_period}</div>'
-            f'<div class="event-meta">{source}{confidence_text}</div>'
-            f'</div>'
-        )
+            calendar_html += (
+                f'<div class="event-box {status}">'
+                f'<div><strong>{company}</strong></div>'
+                f'<div>{fiscal_period}</div>'
+                f'<div class="event-meta">{source}{confidence_text}</div>'
+                f'</div>'
+            )
 
         if len(day_events) > 3:
-            html += f'<div style="font-size:12px;color:#4b5563;">+{len(day_events)-3} more</div>'
+            calendar_html += f'<div style="font-size:12px;color:#4b5563;">+{len(day_events)-3} more</div>'
 
-        html += '</div>'
+        calendar_html += '</div>'
 
-html += '</div></div>'
+calendar_html += '</div></div>'
 
-st.markdown(html, unsafe_allow_html=True)
+st.markdown(calendar_html, unsafe_allow_html=True)
 
-# -----------------------------
-# 상세 테이블
-# -----------------------------
 st.divider()
 st.subheader("Event List")
 
@@ -504,9 +462,6 @@ else:
         hide_index=True
     )
 
-# -----------------------------
-# 예측 결과 요약
-# -----------------------------
 st.divider()
 st.subheader("Prediction Summary")
 
@@ -515,6 +470,7 @@ if predicted_df.empty:
 else:
     pred_show = predicted_df.copy().sort_values(["announcement_date", "company"])
     pred_show["announcement_date"] = pred_show["announcement_date"].dt.strftime("%Y-%m-%d")
+
     st.dataframe(
         pred_show[[
             "announcement_date", "company", "fiscal_period",
