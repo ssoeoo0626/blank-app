@@ -16,8 +16,8 @@ CSV_PATH = BASE_DIR / "earnings 발표일.CSV"
 @st.cache_data
 def load_data():
     df = pd.read_csv(CSV_PATH)
-    df["event_date"] = pd.to_datetime(df["event_date"], errors="coerce")
-    df = df.dropna(subset=["event_date"]).copy()
+    df["announcement_date"] = pd.to_datetime(df["announcement_date"], errors="coerce")
+    df = df.dropna(subset=["announcement_date"]).copy()
     return df
 
 df = load_data()
