@@ -11,7 +11,7 @@ st.title("Competitor / Market Calendar")
 # CSV load
 # -----------------------------
 BASE_DIR = Path(__file__).resolve().parent
-CSV_PATH = BASE_DIR / "earnings_calendar.csv"
+CSV_PATH = BASE_DIR / "earnings 발표일.CSV"
 
 @st.cache_data
 def load_data():
