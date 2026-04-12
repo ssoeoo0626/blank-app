@@ -295,6 +295,7 @@ NEWSROOM_CONFIG = {
         "title_selector": "a",
         "date_selector": ".date, time, .press-release-date",   
     },
+}
 
 def parse_news_date(text):
     if not text:
