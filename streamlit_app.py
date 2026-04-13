@@ -266,7 +266,7 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
 # =============================
 NEWSROOM_CONFIG = {
     "IMAX": {
-        "url": "https://investors.imax.com/news-events/news",
+        "url": "https://investor.imax.com/news/default.aspx",
         "item_selector": "li, .module_item, .news-release, .press-release-item",
         "title_selector": "a",
         "date_selector": ".module_date-text, .date, time",
@@ -283,19 +283,8 @@ NEWSROOM_CONFIG = {
         "title_selector": "a",
         "date_selector": ".date, time, .press-release-date",
     },
-    "Netflix": {
-        "url": "https://about.netflix.com/ko/newsroom",
-        "item_selector": "article, li, .news-item, .press-release-item",
-        "title_selector": "a",
-        "date_selector": ".date, time, .press-release-date",   
-    },
-    "Netflix": {
-        "url": "https://about.netflix.com/ko/newsroom",
-        "item_selector": "article, li, .news-item, .press-release-item",
-        "title_selector": "a",
-        "date_selector": ".date, time, .press-release-date",   
-    },
 }
+
 
 def parse_news_date(text):
     if not text:
