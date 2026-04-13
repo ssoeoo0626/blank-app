@@ -20,7 +20,7 @@ PREDICT_END_YEAR = 2028
 
 
 # =============================
-# 1) RAW CSV LOAD
+# 1) CSV LOAD
 # =============================
 @st.cache_data
 def load_data():
@@ -44,7 +44,7 @@ def load_data():
 
 
 # =============================
-# 2) PREDICTION LOGIC
+# 2) EARNINGS PREDICTION LOGIC
 # =============================
 def normalize_status(value: str) -> str:
     value = str(value).strip().lower()
@@ -54,6 +54,8 @@ def normalize_status(value: str) -> str:
         return "predicted"
     if value in ["planned"]:
         return "planned"
+    if value in ["news"]:
+        return "news"
     return value
 
 
@@ -128,6 +130,7 @@ def weighted_average(values, weights):
 
 def prepare_base_dataframe(df):
     work = df.copy()
+
     work["status_norm"] = work["status"].apply(normalize_status)
     work["quarter"] = work["fiscal_period"].apply(extract_quarter)
     work["fiscal_year"] = work.apply(
@@ -141,6 +144,7 @@ def prepare_base_dataframe(df):
 
     work = work.dropna(subset=["quarter", "period_end"]).copy()
     work["lag_days"] = (work["announcement_date"] - work["period_end"]).dt.days
+
     return work
 
 
@@ -151,6 +155,7 @@ def get_actual_history(df_base, company, quarter, before_fiscal_year):
         (df_base["fiscal_year"] < before_fiscal_year) &
         (df_base["status_norm"] == "actual")
     ].copy()
+
     return hist.sort_values("fiscal_year")
 
 
@@ -161,11 +166,17 @@ def get_peer_history(df_base, company, quarter, before_fiscal_year):
         (df_base["fiscal_year"] < before_fiscal_year) &
         (df_base["status_norm"] == "actual")
     ].copy()
+
     return peer.sort_values("fiscal_year")
 
 
 def default_lag_by_quarter(quarter):
-    defaults = {"Q1": 40, "Q2": 40, "Q3": 40, "Q4": 52}
+    defaults = {
+        "Q1": 40,
+        "Q2": 40,
+        "Q3": 40,
+        "Q4": 52,
+    }
     return defaults.get(quarter, 40)
 
 
@@ -178,23 +189,28 @@ def predict_lag(df_base, company, quarter, target_fiscal_year):
 
     if len(actual_lags) >= 3:
         recent = actual_lags[-3:]
-        return round(weighted_average(recent, [0.2, 0.3, 0.5])), "High", "last_3_actuals_weighted"
+        predicted_lag = round(weighted_average(recent, [0.2, 0.3, 0.5]))
+        return predicted_lag, "High", "last_3_actuals_weighted"
 
     if len(actual_lags) == 2:
         recent = actual_lags[-2:]
-        return round(weighted_average(recent, [0.4, 0.6])), "Mid", "last_2_actuals_weighted"
+        predicted_lag = round(weighted_average(recent, [0.4, 0.6]))
+        return predicted_lag, "Mid", "last_2_actuals_weighted"
 
     if len(actual_lags) == 1:
         company_lag = actual_lags[-1]
         if len(peer_lags) > 0:
             peer_avg = round(sum(peer_lags) / len(peer_lags))
-            return round(company_lag * 0.7 + peer_avg * 0.3), "Low", "1_actual_plus_peer_avg"
+            predicted_lag = round(company_lag * 0.7 + peer_avg * 0.3)
+            return predicted_lag, "Low", "1_actual_plus_peer_avg"
         return company_lag, "Low", "1_actual_only"
 
     if len(peer_lags) > 0:
-        return round(sum(peer_lags) / len(peer_lags)), "Low", "peer_avg_only"
+        predicted_lag = round(sum(peer_lags) / len(peer_lags))
+        return predicted_lag, "Low", "peer_avg_only"
 
-    return default_lag_by_quarter(quarter), "Low", "default_quarter_lag"
+    predicted_lag = default_lag_by_quarter(quarter)
+    return predicted_lag, "Low", "default_quarter_lag"
 
 
 def format_predicted_fiscal_period(fiscal_year, quarter):
@@ -207,7 +223,10 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
     companies = sorted(df_base["company"].dropna().unique().tolist())
     quarters = ["Q1", "Q2", "Q3", "Q4"]
 
-    existing_keys = set(zip(df_base["company"], df_base["quarter"], df_base["fiscal_year"]))
+    existing_keys = set(
+        zip(df_base["company"], df_base["quarter"], df_base["fiscal_year"])
+    )
+
     prediction_rows = []
     working_base = df_base.copy()
 
@@ -283,6 +302,12 @@ NEWSROOM_CONFIG = {
         "title_selector": "a",
         "date_selector": ".date, time, .press-release-date",
     },
+    "Netflix": {
+        "url": "https://about.netflix.com/en/news",
+        "item_selector": "a[href*='/en/news/'], a[href*='/news/']",
+        "title_selector": None,
+        "date_selector": None,
+    },
 }
 
 
@@ -324,13 +349,64 @@ def crawl_company_news(company, config, max_items=10):
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
-        items = soup.select(config["item_selector"])
-
         rows = []
         seen = set()
 
+        if company == "Netflix":
+            links = soup.select(config["item_selector"])
+
+            for link_node in links:
+                title = link_node.get_text(" ", strip=True)
+                href = link_node.get("href", "")
+                full_link = urljoin(config["url"], href) if href else ""
+
+                if not title or not full_link or full_link in seen:
+                    continue
+
+                seen.add(full_link)
+
+                try:
+                    article_resp = requests.get(full_link, headers=headers, timeout=20)
+                    article_resp.raise_for_status()
+                    article_soup = BeautifulSoup(article_resp.text, "html.parser")
+
+                    date_text = ""
+                    time_node = article_soup.select_one("time")
+                    if time_node:
+                        date_text = time_node.get_text(" ", strip=True)
+                    else:
+                        text_candidates = article_soup.get_text(" ", strip=True)
+                        match = re.search(
+                            r"([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4}|[A-Za-z]+\s+[0-9]{1,2},\s+[0-9]{4})",
+                            text_candidates
+                        )
+                        if match:
+                            date_text = match.group(1)
+
+                    news_date = parse_news_date(date_text)
+
+                    if news_date is not None:
+                        rows.append({
+                            "company": company,
+                            "fiscal_period": title,
+                            "announcement_date": news_date,
+                            "status": "news",
+                            "source": "IR Newsroom",
+                            "news_link": full_link,
+                            "news_title": title,
+                        })
+                except Exception:
+                    continue
+
+                if len(rows) >= max_items:
+                    break
+
+            return pd.DataFrame(rows)
+
+        items = soup.select(config["item_selector"])
+
         for item in items:
-            title_node = item.select_one(config["title_selector"])
+            title_node = item.select_one(config["title_selector"]) if config["title_selector"] else item
             if not title_node:
                 continue
 
@@ -339,9 +415,10 @@ def crawl_company_news(company, config, max_items=10):
             link = urljoin(config["url"], href) if href else ""
 
             date_text = ""
-            date_node = item.select_one(config["date_selector"])
-            if date_node:
-                date_text = date_node.get_text(" ", strip=True)
+            if config["date_selector"]:
+                date_node = item.select_one(config["date_selector"])
+                if date_node:
+                    date_text = date_node.get_text(" ", strip=True)
             elif item.find("time"):
                 date_text = item.find("time").get_text(" ", strip=True)
 
