@@ -1,3 +1,4 @@
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -36,9 +37,16 @@ def infer_pool_keys_for_row(category, company, keyword, keyword_type):
         pool_keys.add("official")
 
     if keyword_type in ["재무", "재무/투자"] or any(
-        t in keyword_l for t in [
-            "earnings", "guidance", "outlook", "debt", "refinancing",
-            "liquidity", "investor presentation", "shareholder letter"
+        t in keyword_l
+        for t in [
+            "earnings",
+            "guidance",
+            "outlook",
+            "debt",
+            "refinancing",
+            "liquidity",
+            "investor presentation",
+            "shareholder letter",
         ]
     ):
         pool_keys.add("ir")
@@ -92,8 +100,12 @@ def classify_pool_key(site_row):
         return "korea"
 
     if (
-        "imax" in domain or "dolby" in domain or "cj4dplex" in domain
-        or "d-box" in domain or "mediamation" in domain or "lumma" in domain
+        "imax" in domain
+        or "dolby" in domain
+        or "cj4dplex" in domain
+        or "d-box" in domain
+        or "mediamation" in domain
+        or "lumma" in domain
     ):
         return "competitor"
 
@@ -120,8 +132,10 @@ def build_search_query(company, keyword, domain, use_site_filter=True):
             return 'site:{0} "{1}" "{2}"'.format(domain, company, keyword)
         return 'site:{0} "{1}"'.format(domain, keyword)
 
-    if company and company != "ALL":
+    if company and company != "ALL" and keyword:
         return '"{0}" "{1}"'.format(company, keyword)
+    if company and company != "ALL":
+        return '"{0}"'.format(company)
     return '"{0}"'.format(keyword)
 
 
@@ -138,10 +152,20 @@ def build_query_table(
     max_sites_per_keyword=4,
 ):
     if keyword_df is None or keyword_df.empty or site_pool_df is None or site_pool_df.empty:
-        return pd.DataFrame(columns=[
-            "분류", "회사", "키워드", "키워드유형", "사이트명", "도메인",
-            "우선순위", "pool_key", "뉴스검색가능", "검색쿼리"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "분류",
+                "회사",
+                "키워드",
+                "키워드유형",
+                "사이트명",
+                "도메인",
+                "우선순위",
+                "pool_key",
+                "뉴스검색가능",
+                "검색쿼리",
+            ]
+        )
 
     selected_pool_keys = set(selected_pool_keys or [])
     selected_priorities = set(selected_priorities or [])
@@ -198,57 +222,62 @@ def build_query_table(
                 pool_key = str(s.get("pool_key", "")).strip()
                 news_ok = bool(s.get("뉴스검색가능", False))
 
+                # 검색은 넓게, 도메인 필터는 후처리에서
                 query = build_search_query(company, keyword, domain, use_site_filter=False)
 
-                rows.append({
+                rows.append(
+                    {
+                        "분류": category,
+                        "회사": company,
+                        "키워드": keyword,
+                        "키워드유형": keyword_type,
+                        "사이트명": site_name,
+                        "도메인": domain,
+                        "우선순위": priority,
+                        "pool_key": pool_key,
+                        "뉴스검색가능": 1 if news_ok else 0,
+                        "검색쿼리": query,
+                    }
+                )
+
+        if company in company_domain_map:
+            rows.append(
+                {
                     "분류": category,
                     "회사": company,
                     "키워드": keyword,
                     "키워드유형": keyword_type,
-                    "사이트명": site_name,
-                    "도메인": domain,
-                    "우선순위": priority,
-                    "pool_key": pool_key,
-                    "뉴스검색가능": 1 if news_ok else 0,
-                    "검색쿼리": query,
-                })
-
-        if company in company_domain_map:
-            rows.append({
-                "분류": category,
-                "회사": company,
-                "키워드": keyword,
-                "키워드유형": keyword_type,
-                "사이트명": "{} Official".format(company),
-                "도메인": company_domain_map[company],
-                "우선순위": "P1",
-                "pool_key": "official",
-                "뉴스검색가능": 0,
-                "검색쿼리": build_search_query(company, keyword, company_domain_map[company], use_site_filter=False),
-            })
+                    "사이트명": "{} Official".format(company),
+                    "도메인": company_domain_map[company],
+                    "우선순위": "P1",
+                    "pool_key": "official",
+                    "뉴스검색가능": 0,
+                    "검색쿼리": build_search_query(company, keyword, company_domain_map[company], use_site_filter=False),
+                }
+            )
 
         if company in company_ir_domain_map:
-            rows.append({
-                "분류": category,
-                "회사": company,
-                "키워드": keyword,
-                "키워드유형": keyword_type,
-                "사이트명": "{} IR".format(company),
-                "도메인": company_ir_domain_map[company],
-                "우선순위": "P1",
-                "pool_key": "ir",
-                "뉴스검색가능": 0,
-                "검색쿼리": build_search_query(company, keyword, company_ir_domain_map[company], use_site_filter=False),
-            })
+            rows.append(
+                {
+                    "분류": category,
+                    "회사": company,
+                    "키워드": keyword,
+                    "키워드유형": keyword_type,
+                    "사이트명": "{} IR".format(company),
+                    "도메인": company_ir_domain_map[company],
+                    "우선순위": "P1",
+                    "pool_key": "ir",
+                    "뉴스검색가능": 0,
+                    "검색쿼리": build_search_query(company, keyword, company_ir_domain_map[company], use_site_filter=False),
+                }
+            )
 
     query_df = pd.DataFrame(rows)
     if query_df.empty:
         return query_df
 
     query_df = query_df.drop_duplicates(subset=["회사", "키워드", "도메인", "검색쿼리"]).copy()
-    query_df = query_df.sort_values(
-        ["분류", "회사", "키워드", "우선순위", "사이트명"]
-    ).reset_index(drop=True)
+    query_df = query_df.sort_values(["분류", "회사", "키워드", "우선순위", "사이트명"]).reset_index(drop=True)
     return query_df
 
 
@@ -294,14 +323,21 @@ def fetch_google_news_rss(query, timeout=20, days_back=30):
         source_name = source_el.text.strip() if source_el is not None and source_el.text else ""
         published_at = parse_pubdate(pub_date)
 
-        items.append({
-            "title": title,
-            "url": link,
-            "published_at": published_at,
-            "source": source_name,
-        })
+        items.append(
+            {
+                "title": title,
+                "url": link,
+                "published_at": published_at,
+                "source": source_name,
+            }
+        )
 
     return items, "", url
+
+
+def normalize_text(x):
+    x = str(x or "").lower().strip()
+    return re.sub(r"[^a-z0-9]+", "", x)
 
 
 def extract_domain(url):
@@ -314,21 +350,27 @@ def extract_domain(url):
         return ""
 
 
-def domain_matches(target_domain, article_url, source_name=""):
-    target = str(target_domain or "").strip().lower()
+def domain_matches(target_domain, article_url, source_name="", site_name=""):
+    target_domain = str(target_domain or "").strip().lower()
     article_domain = extract_domain(article_url)
 
-    if not target:
+    if not target_domain:
         return True
 
-    if article_domain == target:
+    # 1) 기사 URL의 실제 도메인이 target과 일치
+    if article_domain == target_domain or article_domain.endswith("." + target_domain):
         return True
 
-    if article_domain.endswith("." + target):
+    # 2) Google News 중계 링크일 때 source / site_name으로 느슨하게 비교
+    target_base = re.sub(r"\.(com|org|net|co|io|kr|jp|us|biz|info)$", "", target_domain)
+    target_norm = normalize_text(target_base)
+    source_norm = normalize_text(source_name)
+    site_norm = normalize_text(site_name)
+
+    if target_norm and source_norm and (target_norm in source_norm or source_norm in target_norm):
         return True
 
-    source_name_l = str(source_name or "").strip().lower()
-    if target.replace(".com", "") in source_name_l:
+    if site_norm and source_norm and (site_norm in source_norm or source_norm in site_norm):
         return True
 
     return False
@@ -360,11 +402,25 @@ def build_query_candidates(company, keyword):
 
 def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
     if query_df is None or query_df.empty:
-        return pd.DataFrame(columns=[
-            "published_at", "분류", "회사", "키워드", "사이트명", "도메인",
-            "title", "url", "source", "검색쿼리", "수집상태", "오류메시지",
-            "debug_query", "retry_stage", "raw_result_count"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "published_at",
+                "분류",
+                "회사",
+                "키워드",
+                "사이트명",
+                "도메인",
+                "title",
+                "url",
+                "source",
+                "검색쿼리",
+                "수집상태",
+                "오류메시지",
+                "debug_query",
+                "retry_stage",
+                "raw_result_count",
+            ]
+        )
 
     rows = []
     seen = set()
@@ -374,11 +430,25 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
         use_df = use_df[use_df["뉴스검색가능"] == 1].copy()
 
     if use_df.empty:
-        return pd.DataFrame(columns=[
-            "published_at", "분류", "회사", "키워드", "사이트명", "도메인",
-            "title", "url", "source", "검색쿼리", "수집상태", "오류메시지",
-            "debug_query", "retry_stage", "raw_result_count"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "published_at",
+                "분류",
+                "회사",
+                "키워드",
+                "사이트명",
+                "도메인",
+                "title",
+                "url",
+                "source",
+                "검색쿼리",
+                "수집상태",
+                "오류메시지",
+                "debug_query",
+                "retry_stage",
+                "raw_result_count",
+            ]
+        )
 
     error_count = 0
 
@@ -413,7 +483,15 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
             if err:
                 continue
 
-            filtered_items = news_items[:]
+            filtered_items = []
+            for item in news_items:
+                if domain_matches(
+                    domain,
+                    item.get("url", ""),
+                    item.get("source", ""),
+                    site_name,
+                ):
+                    filtered_items.append(item)
 
             if filtered_items:
                 matched_items = filtered_items
@@ -421,7 +499,31 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
 
         if last_err and not matched_items:
             if error_count < max_errors_to_keep:
-                rows.append({
+                rows.append(
+                    {
+                        "published_at": pd.NaT,
+                        "분류": category,
+                        "회사": company,
+                        "키워드": keyword,
+                        "사이트명": site_name,
+                        "도메인": domain,
+                        "title": "",
+                        "url": "",
+                        "source": "",
+                        "검색쿼리": original_query,
+                        "수집상태": "error",
+                        "오류메시지": last_err,
+                        "debug_query": last_debug_query,
+                        "retry_stage": last_retry_stage,
+                        "raw_result_count": last_raw_count,
+                    }
+                )
+                error_count += 1
+            continue
+
+        if not matched_items:
+            rows.append(
+                {
                     "published_at": pd.NaT,
                     "분류": category,
                     "회사": company,
@@ -432,33 +534,13 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
                     "url": "",
                     "source": "",
                     "검색쿼리": original_query,
-                    "수집상태": "error",
-                    "오류메시지": last_err,
+                    "수집상태": "empty",
+                    "오류메시지": "",
                     "debug_query": last_debug_query,
                     "retry_stage": last_retry_stage,
                     "raw_result_count": last_raw_count,
-                })
-                error_count += 1
-            continue
-
-        if not matched_items:
-            rows.append({
-                "published_at": pd.NaT,
-                "분류": category,
-                "회사": company,
-                "키워드": keyword,
-                "사이트명": site_name,
-                "도메인": domain,
-                "title": "",
-                "url": "",
-                "source": "",
-                "검색쿼리": original_query,
-                "수집상태": "empty",
-                "오류메시지": "",
-                "debug_query": last_debug_query,
-                "retry_stage": last_retry_stage,
-                "raw_result_count": last_raw_count,
-            })
+                }
+            )
             continue
 
         for item in matched_items:
@@ -472,23 +554,25 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
                 continue
             seen.add(dedup_key)
 
-            rows.append({
-                "published_at": published_at,
-                "분류": category,
-                "회사": company,
-                "키워드": keyword,
-                "사이트명": site_name,
-                "도메인": domain,
-                "title": title,
-                "url": url,
-                "source": source,
-                "검색쿼리": original_query,
-                "수집상태": "ok",
-                "오류메시지": "",
-                "debug_query": last_debug_query,
-                "retry_stage": last_retry_stage,
-                "raw_result_count": last_raw_count,
-            })
+            rows.append(
+                {
+                    "published_at": published_at,
+                    "분류": category,
+                    "회사": company,
+                    "키워드": keyword,
+                    "사이트명": site_name,
+                    "도메인": domain,
+                    "title": title,
+                    "url": url,
+                    "source": source,
+                    "검색쿼리": original_query,
+                    "수집상태": "ok",
+                    "오류메시지": "",
+                    "debug_query": last_debug_query,
+                    "retry_stage": last_retry_stage,
+                    "raw_result_count": last_raw_count,
+                }
+            )
 
     df = pd.DataFrame(rows)
     if df.empty:
