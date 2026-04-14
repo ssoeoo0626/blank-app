@@ -3,11 +3,9 @@ import pandas as pd
 import calendar
 import re
 import html as html_lib
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
+from news_fetcher import fetch_all_news
 
 st.set_page_config(page_title="Earnings & IR News Calendar", layout="wide")
 st.title("Competitor / Market Calendar")
@@ -281,195 +279,51 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
 
 
 # =============================
-# 3) NEWSROOM CRAWLING
+# 3) AUTO NEWS LOAD
 # =============================
-NEWSROOM_CONFIG = {
-    "IMAX": {
-        "url": "https://investor.imax.com/news/default.aspx",
-        "item_selector": "li, .module_item, .news-release, .press-release-item",
-        "title_selector": "a",
-        "date_selector": ".module_date-text, .date, time",
-    },
-    "Cinemark": {
-        "url": "https://ir.cinemark.com/news-events/press-releases",
-        "item_selector": "li, .module_item, .news-release, .press-release-item",
-        "title_selector": "a",
-        "date_selector": ".module_date-text, .date, time",
-    },
-    "Cineplex": {
-        "url": "https://www.newswire.ca/news-releases/cineplex-inc-latest-news/",
-        "item_selector": "article, li, .news-item, .press-release-item",
-        "title_selector": "a",
-        "date_selector": ".date, time, .press-release-date",
-    },
-    "Netflix": {
-        "url": "https://about.netflix.com/en/news",
-        "item_selector": "a[href*='/en/news/'], a[href*='/news/']",
-        "title_selector": None,
-        "date_selector": None,
-    },
-}
-
-
-def parse_news_date(text):
-    if not text:
-        return None
-
-    text = str(text).strip()
-
-    date_formats = [
-        "%B %d, %Y",
-        "%b %d, %Y",
-        "%Y-%m-%d",
-        "%m/%d/%Y",
-        "%d %B %Y",
-        "%d %b %Y",
-    ]
-
-    for fmt in date_formats:
-        try:
-            return pd.to_datetime(datetime.strptime(text, fmt)).normalize()
-        except Exception:
-            pass
-
-    try:
-        parsed = pd.to_datetime(text, errors="coerce")
-        if pd.isna(parsed):
-            return None
-        return parsed.normalize()
-    except Exception:
-        return None
-
-
 @st.cache_data(ttl=3600)
-def crawl_company_news(company, config, max_items=10):
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(config["url"], headers=headers, timeout=20)
-        response.raise_for_status()
+def load_auto_news():
+    df = fetch_all_news(days_back=45)
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        rows = []
-        seen = set()
-
-        if company == "Netflix":
-            links = soup.select(config["item_selector"])
-
-            for link_node in links:
-                title = link_node.get_text(" ", strip=True)
-                href = link_node.get("href", "")
-                full_link = urljoin(config["url"], href) if href else ""
-
-                if not title or not full_link or full_link in seen:
-                    continue
-
-                seen.add(full_link)
-
-                try:
-                    article_resp = requests.get(full_link, headers=headers, timeout=20)
-                    article_resp.raise_for_status()
-                    article_soup = BeautifulSoup(article_resp.text, "html.parser")
-
-                    date_text = ""
-                    time_node = article_soup.select_one("time")
-                    if time_node:
-                        date_text = time_node.get_text(" ", strip=True)
-                    else:
-                        text_candidates = article_soup.get_text(" ", strip=True)
-                        match = re.search(
-                            r"([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4}|[A-Za-z]+\s+[0-9]{1,2},\s+[0-9]{4})",
-                            text_candidates
-                        )
-                        if match:
-                            date_text = match.group(1)
-
-                    news_date = parse_news_date(date_text)
-
-                    if news_date is not None:
-                        rows.append({
-                            "company": company,
-                            "fiscal_period": title,
-                            "announcement_date": news_date,
-                            "status": "news",
-                            "source": "IR Newsroom",
-                            "news_link": full_link,
-                            "news_title": title,
-                        })
-                except Exception:
-                    continue
-
-                if len(rows) >= max_items:
-                    break
-
-            return pd.DataFrame(rows)
-
-        items = soup.select(config["item_selector"])
-
-        for item in items:
-            title_node = item.select_one(config["title_selector"]) if config["title_selector"] else item
-            if not title_node:
-                continue
-
-            title = title_node.get_text(" ", strip=True)
-            href = title_node.get("href", "")
-            link = urljoin(config["url"], href) if href else ""
-
-            date_text = ""
-            if config["date_selector"]:
-                date_node = item.select_one(config["date_selector"])
-                if date_node:
-                    date_text = date_node.get_text(" ", strip=True)
-            elif item.find("time"):
-                date_text = item.find("time").get_text(" ", strip=True)
-
-            news_date = parse_news_date(date_text)
-
-            if not title or title in seen:
-                continue
-
-            seen.add(title)
-
-            rows.append({
-                "company": company,
-                "fiscal_period": title,
-                "announcement_date": news_date,
-                "status": "news",
-                "source": "IR Newsroom",
-                "news_link": link,
-                "news_title": title,
-            })
-
-            if len(rows) >= max_items:
-                break
-
-        df = pd.DataFrame(rows)
-        if not df.empty:
-            df = df.dropna(subset=["announcement_date"]).copy()
-
-        return df
-
-    except Exception:
+    if df is None or df.empty:
         return pd.DataFrame(columns=[
-            "company", "fiscal_period", "announcement_date",
-            "status", "source", "news_link", "news_title"
+            "company", "fiscal_period", "announcement_date", "status", "source",
+            "news_link", "news_title"
         ])
 
+    news = df.copy()
 
-def load_all_newsroom_data():
-    news_frames = []
+    # 컬럼명 통일
+    if "title" in news.columns:
+        news["news_title"] = news["title"]
+    else:
+        news["news_title"] = ""
 
-    for company, config in NEWSROOM_CONFIG.items():
-        news_df = crawl_company_news(company, config, max_items=10)
-        if not news_df.empty:
-            news_frames.append(news_df)
+    if "url" in news.columns:
+        news["news_link"] = news["url"]
+    else:
+        news["news_link"] = ""
 
-    if news_frames:
-        return pd.concat(news_frames, ignore_index=True)
+    if "date" in news.columns:
+        news["announcement_date"] = pd.to_datetime(news["date"], errors="coerce")
+    else:
+        news["announcement_date"] = pd.NaT
 
-    return pd.DataFrame(columns=[
-        "company", "fiscal_period", "announcement_date",
-        "status", "source", "news_link", "news_title"
-    ])
+    if "source" not in news.columns:
+        news["source"] = "News"
+
+    if "company" not in news.columns:
+        news["company"] = "Industry"
+
+    news["fiscal_period"] = news["news_title"]
+    news["status"] = "news"
+
+    news = news.dropna(subset=["announcement_date"]).copy()
+
+    return news[[
+        "company", "fiscal_period", "announcement_date", "status", "source",
+        "news_link", "news_title"
+    ]]
 
 
 # =============================
@@ -477,7 +331,7 @@ def load_all_newsroom_data():
 # =============================
 df_raw = load_data()
 predicted_df = generate_predictions(df_raw, PREDICT_START_YEAR, PREDICT_END_YEAR)
-news_df = load_all_newsroom_data()
+news_df = load_auto_news()
 
 frames = [df_raw.copy()]
 
@@ -511,6 +365,10 @@ default_year_index = year_options.index(today.year) if today.year in year_option
 
 year = st.sidebar.selectbox("Year", year_options, index=default_year_index)
 month = st.sidebar.selectbox("Month", list(range(1, 13)), index=today.month - 1)
+
+if st.sidebar.button("Refresh News"):
+    st.cache_data.clear()
+    st.rerun()
 
 company_options = ["All"] + sorted(display_df["company"].dropna().unique().tolist())
 status_options = ["All"] + sorted(display_df["status"].dropna().unique().tolist())
@@ -688,6 +546,7 @@ else:
     show["announcement_date"] = show["announcement_date"].dt.strftime("%Y-%m-%d")
 
     cols = ["announcement_date", "company", "fiscal_period", "status", "source"]
+
     if "prediction_confidence" in show.columns:
         cols.append("prediction_confidence")
     if "prediction_basis" in show.columns:
@@ -728,16 +587,16 @@ else:
 # 11) NEWS SUMMARY
 # =============================
 st.divider()
-st.subheader("Latest IR Newsroom Articles")
+st.subheader("Latest IR / Industry News")
 
 if news_df.empty:
-    st.info("No newsroom articles found.")
+    st.info("No news articles found.")
 else:
     news_show = news_df.copy().sort_values("announcement_date", ascending=False)
     news_show["announcement_date"] = news_show["announcement_date"].dt.strftime("%Y-%m-%d")
 
     st.dataframe(
-        news_show[["announcement_date", "company", "news_title", "news_link"]],
+        news_show[["announcement_date", "company", "news_title", "news_link", "source"]],
         use_container_width=True,
         hide_index=True
     )
