@@ -1,9 +1,9 @@
-
 import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 
 import pandas as pd
 
@@ -198,7 +198,7 @@ def build_query_table(
                 pool_key = str(s.get("pool_key", "")).strip()
                 news_ok = bool(s.get("뉴스검색가능", False))
 
-                query = build_search_query(company, keyword, domain, use_site_filter=news_ok)
+                query = build_search_query(company, keyword, domain, use_site_filter=False)
 
                 rows.append({
                     "분류": category,
@@ -213,8 +213,6 @@ def build_query_table(
                     "검색쿼리": query,
                 })
 
-        # company domain rows are kept for query builder visibility,
-        # but marked as not news-searchable by default
         if company in company_domain_map:
             rows.append({
                 "분류": category,
@@ -285,7 +283,7 @@ def fetch_google_news_rss(query, timeout=20, days_back=30):
         raw = fetch_url_text(url, timeout=timeout)
         root = ET.fromstring(raw)
     except Exception as e:
-        return [], str(e)
+        return [], str(e), url
 
     items = []
     for item in root.findall(".//item"):
@@ -303,14 +301,69 @@ def fetch_google_news_rss(query, timeout=20, days_back=30):
             "source": source_name,
         })
 
-    return items, ""
+    return items, "", url
+
+
+def extract_domain(url):
+    try:
+        netloc = urlparse(str(url)).netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        return netloc
+    except Exception:
+        return ""
+
+
+def domain_matches(target_domain, article_url, source_name=""):
+    target = str(target_domain or "").strip().lower()
+    article_domain = extract_domain(article_url)
+
+    if not target:
+        return True
+
+    if article_domain == target:
+        return True
+
+    if article_domain.endswith("." + target):
+        return True
+
+    source_name_l = str(source_name or "").strip().lower()
+    if target.replace(".com", "") in source_name_l:
+        return True
+
+    return False
+
+
+def build_query_candidates(company, keyword):
+    company = str(company or "").strip()
+    keyword = str(keyword or "").strip()
+
+    candidates = []
+
+    if company and keyword:
+        candidates.append(("company_keyword", '"{0}" "{1}"'.format(company, keyword)))
+
+    if company:
+        candidates.append(("company_only", '"{0}"'.format(company)))
+
+    if keyword:
+        candidates.append(("keyword_only", '"{0}"'.format(keyword)))
+
+    seen = set()
+    out = []
+    for stage, query in candidates:
+        if query not in seen:
+            seen.add(query)
+            out.append((stage, query))
+    return out
 
 
 def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
     if query_df is None or query_df.empty:
         return pd.DataFrame(columns=[
             "published_at", "분류", "회사", "키워드", "사이트명", "도메인",
-            "title", "url", "source", "검색쿼리", "수집상태", "오류메시지"
+            "title", "url", "source", "검색쿼리", "수집상태", "오류메시지",
+            "debug_query", "retry_stage", "raw_result_count"
         ])
 
     rows = []
@@ -323,7 +376,8 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
     if use_df.empty:
         return pd.DataFrame(columns=[
             "published_at", "분류", "회사", "키워드", "사이트명", "도메인",
-            "title", "url", "source", "검색쿼리", "수집상태", "오류메시지"
+            "title", "url", "source", "검색쿼리", "수집상태", "오류메시지",
+            "debug_query", "retry_stage", "raw_result_count"
         ])
 
     error_count = 0
@@ -334,15 +388,41 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
         keyword = str(r.get("키워드", "")).strip()
         site_name = str(r.get("사이트명", "")).strip()
         domain = str(r.get("도메인", "")).strip()
-        query = str(r.get("검색쿼리", "")).strip()
+        original_query = str(r.get("검색쿼리", "")).strip()
 
-        if not query:
+        if not company and not keyword:
             continue
 
-        news_items, err = fetch_google_news_rss(query=query, days_back=days_back)
-        time.sleep(0.2)
+        query_candidates = build_query_candidates(company, keyword)
 
-        if err:
+        matched_items = []
+        last_err = ""
+        last_debug_query = ""
+        last_retry_stage = ""
+        last_raw_count = 0
+
+        for retry_stage, debug_query in query_candidates:
+            news_items, err, rss_url = fetch_google_news_rss(query=debug_query, days_back=days_back)
+            time.sleep(0.2)
+
+            last_err = err
+            last_debug_query = debug_query
+            last_retry_stage = retry_stage
+            last_raw_count = len(news_items)
+
+            if err:
+                continue
+
+            filtered_items = []
+            for item in news_items:
+                if domain_matches(domain, item.get("url", ""), item.get("source", "")):
+                    filtered_items.append(item)
+
+            if filtered_items:
+                matched_items = filtered_items
+                break
+
+        if last_err and not matched_items:
             if error_count < max_errors_to_keep:
                 rows.append({
                     "published_at": pd.NaT,
@@ -354,14 +434,17 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
                     "title": "",
                     "url": "",
                     "source": "",
-                    "검색쿼리": query,
+                    "검색쿼리": original_query,
                     "수집상태": "error",
-                    "오류메시지": err,
+                    "오류메시지": last_err,
+                    "debug_query": last_debug_query,
+                    "retry_stage": last_retry_stage,
+                    "raw_result_count": last_raw_count,
                 })
                 error_count += 1
             continue
 
-        if not news_items:
+        if not matched_items:
             rows.append({
                 "published_at": pd.NaT,
                 "분류": category,
@@ -372,13 +455,16 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
                 "title": "",
                 "url": "",
                 "source": "",
-                "검색쿼리": query,
+                "검색쿼리": original_query,
                 "수집상태": "empty",
                 "오류메시지": "",
+                "debug_query": last_debug_query,
+                "retry_stage": last_retry_stage,
+                "raw_result_count": last_raw_count,
             })
             continue
 
-        for item in news_items:
+        for item in matched_items:
             title = str(item.get("title", "")).strip()
             url = str(item.get("url", "")).strip()
             source = str(item.get("source", "")).strip()
@@ -399,9 +485,12 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
                 "title": title,
                 "url": url,
                 "source": source,
-                "검색쿼리": query,
+                "검색쿼리": original_query,
                 "수집상태": "ok",
                 "오류메시지": "",
+                "debug_query": last_debug_query,
+                "retry_stage": last_retry_stage,
+                "raw_result_count": last_raw_count,
             })
 
     df = pd.DataFrame(rows)
