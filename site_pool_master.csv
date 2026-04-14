@@ -1,0 +1,22 @@
+﻿풀구분,소스유형,사이트명,도메인,우선순위,권장용도
+공통,공식,Company Official Newsroom,{company_domain},P1,보도자료/오픈/제휴/설치/런칭
+공통,공식,Company Investor Relations,{company_ir_domain},P1,실적/가이던스/투자자료/부채/리파이낸싱
+극장/전시업,트레이드,Boxoffice Pro,boxofficepro.com,P1,극장사/특별관/오픈/확장/CinemaCon/업계 뉴스
+극장/전시업,협회,Cinema United,cinemaunited.org,P1,북미 전시업/극장 체인/정책/행사
+극장/전시업,협회,UNIC,unic-cinemas.org,P1,유럽 전시업/극장 체인/유럽 정책/행사
+영화/미디어,트레이드,Variety,variety.com,P1,스튜디오/배급/콘텐츠 슬레이트/엔터테인먼트 업계
+영화/미디어,트레이드,Deadline,deadline.com,P1,속보/딜/캐스팅/배급/개봉 전략
+박스오피스/릴리즈,데이터,The Numbers,the-numbers.com,P1,릴리즈 캘린더/박스오피스/타이틀 성과
+박스오피스/릴리즈,데이터,Comscore Movies,movies.comscore.com,P1,글로벌 박스오피스/시장 퍼포먼스
+한국,공식/산업,KOFIC,kofic.or.kr,P1,한국 영화산업/정책/통계
+한국,공식/산업,KOBIS / KoBiz,kobis.or.kr,P1,한국 박스오피스/한국 영화 해외 정보/산업 뉴스
+한국,공식/산업,KoBiz English,koreanfilm.or.kr,P1,영문 한국영화 산업/해외배급/리포트
+포맷/경쟁사,공식,IMAX Official,imax.com,P1,IMAX 설치/라인업/실적
+포맷/경쟁사,공식,Dolby Official,dolby.com,P1,Dolby Cinema/Atmos/Vision/실적
+포맷/경쟁사,공식,CJ 4DPLEX / 4DX / ScreenX,cj4dplex.com,P1,4DX/ScreenX 오픈/설치/라인업
+포맷/경쟁사,공식,D-BOX Official,d-box.com,P1,D-BOX 설치/실적/파트너십
+포맷/경쟁사,공식,MediaMation / MX4D,mediamation.com,P1,MX4D/어트랙션/설치
+포맷/경쟁사,공식,Lumma / 4D E-Motion,lumma.com,P2,Lumma/4D E-Motion/Magnify8
+행사,공식,CinemaCon,cinemacon.com,P1,CinemaCon 발표/상영관 투자/포맷 뉴스
+행사,공식,CineEurope / UNIC,unic-cinemas.org,P1,유럽 행사/전시업 발표
+선별보조,검색엔진,Google News,news.google.com,P2,빠른 보조 검색/누락 체크
