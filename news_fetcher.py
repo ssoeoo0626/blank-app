@@ -413,10 +413,7 @@ def fetch_news_from_query_table(query_df, days_back=30, max_errors_to_keep=50):
             if err:
                 continue
 
-            filtered_items = []
-            for item in news_items:
-                if domain_matches(domain, item.get("url", ""), item.get("source", "")):
-                    filtered_items.append(item)
+            filtered_items = news_items[:]
 
             if filtered_items:
                 matched_items = filtered_items
