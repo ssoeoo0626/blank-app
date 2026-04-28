@@ -7,7 +7,7 @@ IMAX,2025 Q1,2025-04-23,Past,IMAX IR
 IMAX,2025 Q2,2025-07-24,Past,IMAX IR
 IMAX,2025 Q3,2025-10-23,Past,IMAX IR
 IMAX,2025 Q4 / FY2025,2026-02-25,Past,IMAX IR
-IMAX,2026 Q1,2025-04-30,Past,IMAX IR
+IMAX,2026 Q1,2026-04-30,Past,IMAX IR
 Dolby,2024 Q1,2024-02-01,Past,Dolby IR
 Dolby,2024 Q2,2024-05-02,Past,Dolby IR
 Dolby,2024 Q3,2024-08-07,Past,Dolby IR
@@ -24,16 +24,7 @@ AMC,2025 Q1,2025-05-07,Past,AMC IR
 AMC,2025 Q2,2025-08-11,Past,AMC IR
 AMC,2025 Q3,2025-11-05,Past,AMC IR
 AMC,2025 Q4 / FY2025,2026-02-23,Past,AMC IR
-Cinemark,2024 Q3,2024-10-31,Past,Cinemark IR
-Cinemark,2024 Q4 / FY2024,2025-02-19,Past,Cinemark IR
-Cinemark,2025 Q1,2025-05-02,Past,Cinemark IR
-Cinemark,2025 Q2,2025-08-01,Past,Cinemark IR
-Cinemark,2025 Q3,2025-10-31,Past,Cinemark IR
-Cinemark,2025 Q4 / FY2025,2026-02-18,Past,Cinemark IR
-Cineplex,2025 Q2,2025-08-12,Past,Cineplex IR
-Cineplex,2025 Q3,2025-11-11,Past,Cineplex IR
-Cineplex,2025 Q4 / FY2025,2026-03-30,Past,Cineplex IR
-Cinemark,2026 Q1,2025-05-01,Past,Cinemark IR
+AMC,2025 Q1,2026-05-06,Past,AMC IR
 D-BOX,2025 Q1,2024-08-13,Past,D-BOX IR
 D-BOX,2025 Q2,2024-11-12,Past,D-BOX IR
 D-BOX,2025 Q3,2025-02-12,Past,D-BOX IR
@@ -41,27 +32,12 @@ D-BOX,2025 Q4 / FY2025,2025-06-10,Past,D-BOX IR
 D-BOX,2026 Q1,2025-08-13,Past,D-BOX IR
 D-BOX,2026 Q2,2025-11-12,Past,D-BOX IR
 D-BOX,2026 Q3,2026-02-10,Past,D-BOX IR
+D-BOX,2026 Q4,2026-05-28,predicted,External earnings calendar,TBA
 Netflix,2025 Q1,2025-04-17,Past,Netflix IR
 Netflix,2025 Q2,2025-07-17,Past,Netflix IR
 Netflix,2025 Q3,2025-10-21,Past,Netflix IR
 Netflix,2025 Q4 / FY2025,2026-01-20,Past,Netflix IR
 Netflix,2026 Q1,2026-04-16,Past,Netflix IR
-Lionsgate,2025 Q4 / FY2025,2025-05-22,Past,Lionsgate IR
-Lionsgate,2026 Q1,2025-08-07,Past,Lionsgate IR
-Lionsgate,2026 Q2,2025-11-06,Past,Lionsgate IR
-Lionsgate,2026 Q3,2026-02-05,Past,Lionsgate IR
-Cineverse,2025 Q4 / FY2025,2025-06-27,Past,Cineverse IR
-Cineverse,2026 Q3,2026-02-17,Past,Cineverse IR
-Marcus Corporation,2025 Q1,2025-05-06,Past,Marcus IR
-Marcus Corporation,2025 Q4 / FY2025,2026-02-26,Past,Marcus IR
-Kinepolis,2024 FY2024,2025-02-20,Past,Kinepolis IR
-Kinepolis,2025 Q1 Business Update,2025-04-24,Past,Kinepolis IR
-Kinepolis,2025 H1 Results,2025-08-21,Past,Kinepolis IR
-Kinepolis,2025 Q3 Business Update,2025-10-23,Past,Kinepolis IR
-CJ CGV,2025 Q1,2025-05-08,Past,DART
-CJ CGV,2025 Q3,2025-11-06,Past,DART
-Vue International,FY2024 Annual Report,2025-04-10,Past,Vue IR
-Vue International,H1 2025 Mid Year Update,2025-11-27,Past,Vue IR
 Cinemark,2023 Q1,2023-05-05,Past,Cinemark IR
 Cinemark,2023 Q2,2023-08-04,Past,Cinemark IR
 Cinemark,2023 Q3,2023-11-03,Past,Cinemark IR
@@ -78,6 +54,7 @@ Cinemark,2025 Q1,2025-05-02,Past,Cinemark IR
 Cinemark,2025 Q2,2025-08-01,Past,Cinemark IR
 Cinemark,2025 Q3,2025-11-05,Past,Cinemark IR
 Cinemark,2025 Q4 / FY2025,2026-02-18,Past,Cinemark IR
+Cinemark,2026 Q1,2026-05-01,Past,Cinemark IR
 Cineplex,2024 Q1,2024-05-09,Past,Cineplex IR
 Cineplex,2024 Q2,2024-08-09,Past,Cineplex IR
 Cineplex,2024 Q3,2024-11-06,Past,Cineplex IR
@@ -86,4 +63,4 @@ Cineplex,2025 Q1,2025-05-09,Past,Cineplex IR
 Cineplex,2025 Q2,2025-08-12,Past,Cineplex IR
 Cineplex,2025 Q3,2025-11-06,Past,Cineplex IR
 Cineplex,2025 Q4 / FY2025,2026-02-11,Past,Cineplex IR
-Cineplex,2026 Q1,2025-04-08,Past,Cineplex IR
+Cineplex,2026 Q1,2026-05-11,Past,Cineplex IR
