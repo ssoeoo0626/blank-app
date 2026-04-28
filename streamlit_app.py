@@ -1,4 +1,3 @@
-
 import calendar
 import html as html_lib
 import re
@@ -28,8 +27,14 @@ PREDICT_END_YEAR = 2028
 # =============================
 # 1) LOADERS
 # =============================
+def get_file_mtime(path: Path) -> float:
+    if path.exists():
+        return path.stat().st_mtime
+    return 0
+
+
 @st.cache_data
-def load_earnings_data(path_str: str):
+def load_earnings_data(path_str: str, file_mtime: float):
     path = Path(path_str)
     if not path.exists():
         return pd.DataFrame(columns=["company", "fiscal_period", "announcement_date", "status", "source"])
@@ -47,11 +52,12 @@ def load_earnings_data(path_str: str):
 
     df["announcement_date"] = pd.to_datetime(df["announcement_date"], errors="coerce")
     df = df.dropna(subset=["announcement_date"]).copy()
+
     return df
 
 
 @st.cache_data
-def load_keywords(path_str: str):
+def load_keywords(path_str: str, file_mtime: float):
     path = Path(path_str)
     if not path.exists():
         return pd.DataFrame(columns=["분류", "회사", "키워드", "키워드유형", "활성화", "비고"])
@@ -76,7 +82,7 @@ def load_keywords(path_str: str):
 
 
 @st.cache_data
-def load_site_pool(path_str: str):
+def load_site_pool(path_str: str, file_mtime: float):
     path = Path(path_str)
     if not path.exists():
         return pd.DataFrame(columns=["풀구분", "소스유형", "사이트명", "도메인", "우선순위", "권장용도"])
@@ -97,7 +103,7 @@ def load_site_pool(path_str: str):
 
 
 @st.cache_data
-def load_company_domains(path_str: str):
+def load_company_domains(path_str: str, file_mtime: float):
     path = Path(path_str)
     if not path.exists():
         return pd.DataFrame(columns=["회사", "도메인", "IR도메인", "IR뉴스URL", "비고"])
@@ -121,12 +127,16 @@ def load_company_domains(path_str: str):
 # =============================
 def normalize_status(value: str) -> str:
     value = str(value).strip().lower()
+
     if value in ["past", "confirmed", "actual"]:
         return "actual"
+
     if value in ["predicted", "prediction"]:
         return "predicted"
+
     if value in ["planned"]:
         return "planned"
+
     return value
 
 
@@ -154,6 +164,7 @@ def extract_quarter(fiscal_period: str):
 def extract_fiscal_year(fiscal_period: str, announcement_date: pd.Timestamp):
     text = str(fiscal_period).upper().strip()
     match = re.search(r"(20\d{2})", text)
+
     if match:
         return int(match.group(1))
 
@@ -195,7 +206,12 @@ def adjust_to_business_day(ts: pd.Timestamp):
 def weighted_average(values, weights):
     if not values:
         return None
-    return sum(v * w for v, w in zip(values, weights)) / sum(weights)
+
+    total_weight = sum(weights)
+    if total_weight == 0:
+        return None
+
+    return sum(v * w for v, w in zip(values, weights)) / total_weight
 
 
 def prepare_base_dataframe(df):
@@ -205,16 +221,20 @@ def prepare_base_dataframe(df):
     work = df.copy()
     work["status_norm"] = work["status"].apply(normalize_status)
     work["quarter"] = work["fiscal_period"].apply(extract_quarter)
+
     work["fiscal_year"] = work.apply(
         lambda row: extract_fiscal_year(row["fiscal_period"], row["announcement_date"]),
         axis=1
     )
+
     work["period_end"] = work.apply(
         lambda row: get_period_end(row["fiscal_year"], row["quarter"]),
         axis=1
     )
+
     work = work.dropna(subset=["quarter", "period_end"]).copy()
     work["lag_days"] = (work["announcement_date"] - work["period_end"]).dt.days
+
     return work
 
 
@@ -225,6 +245,7 @@ def get_actual_history(df_base, company, quarter, before_fiscal_year):
         (df_base["fiscal_year"] < before_fiscal_year) &
         (df_base["status_norm"] == "actual")
     ].copy()
+
     return hist.sort_values("fiscal_year")
 
 
@@ -235,11 +256,19 @@ def get_peer_history(df_base, company, quarter, before_fiscal_year):
         (df_base["fiscal_year"] < before_fiscal_year) &
         (df_base["status_norm"] == "actual")
     ].copy()
+
     return peer.sort_values("fiscal_year")
 
 
 def default_lag_by_quarter(quarter):
-    return {"Q1": 40, "Q2": 40, "Q3": 40, "Q4": 52}.get(quarter, 40)
+    default_map = {
+        "Q1": 40,
+        "Q2": 40,
+        "Q3": 40,
+        "Q4": 52,
+    }
+
+    return default_map.get(quarter, 40)
 
 
 def predict_lag(df_base, company, quarter, target_fiscal_year):
@@ -259,9 +288,11 @@ def predict_lag(df_base, company, quarter, target_fiscal_year):
 
     if len(actual_lags) == 1:
         company_lag = actual_lags[-1]
+
         if len(peer_lags) > 0:
             peer_avg = round(sum(peer_lags) / len(peer_lags))
             return round(company_lag * 0.7 + peer_avg * 0.3), "Low", "1_actual_plus_peer_avg"
+
         return company_lag, "Low", "1_actual_only"
 
     if len(peer_lags) > 0:
@@ -277,15 +308,23 @@ def format_predicted_fiscal_period(fiscal_year, quarter):
 def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT_END_YEAR):
     if df_raw.empty:
         return pd.DataFrame(columns=[
-            "company", "fiscal_period", "announcement_date", "status", "source",
-            "prediction_confidence", "prediction_basis"
+            "company",
+            "fiscal_period",
+            "announcement_date",
+            "status",
+            "source",
+            "prediction_confidence",
+            "prediction_basis",
         ])
+
+    today_ts = pd.Timestamp(date.today())
 
     df_base = prepare_base_dataframe(df_raw)
     companies = sorted(df_base["company"].dropna().unique().tolist())
     quarters = ["Q1", "Q2", "Q3", "Q4"]
 
     existing_keys = set(zip(df_base["company"], df_base["quarter"], df_base["fiscal_year"]))
+
     prediction_rows = []
     working_base = df_base.copy()
 
@@ -295,12 +334,26 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
         for company in companies:
             for quarter in quarters:
                 key = (company, quarter, fiscal_year)
+
                 if key in existing_keys:
                     continue
 
-                predicted_lag, confidence, basis = predict_lag(working_base, company, quarter, fiscal_year)
+                predicted_lag, confidence, basis = predict_lag(
+                    working_base,
+                    company,
+                    quarter,
+                    fiscal_year,
+                )
+
                 period_end = get_period_end(fiscal_year, quarter)
-                predicted_date = adjust_to_business_day(period_end + pd.Timedelta(days=int(predicted_lag)))
+                predicted_date = adjust_to_business_day(
+                    period_end + pd.Timedelta(days=int(predicted_lag))
+                )
+
+                # 오늘보다 과거인 예측값은 생성하지 않음
+                if predicted_date < today_ts:
+                    existing_keys.add(key)
+                    continue
 
                 new_rows_for_year.append({
                     "company": company,
@@ -311,30 +364,72 @@ def generate_predictions(df_raw, start_year=PREDICT_START_YEAR, end_year=PREDICT
                     "prediction_confidence": confidence,
                     "prediction_basis": basis,
                 })
+
                 existing_keys.add(key)
 
         if new_rows_for_year:
             year_df = pd.DataFrame(new_rows_for_year)
             prediction_rows.append(year_df)
-            working_base = pd.concat([working_base, year_df], ignore_index=True)
+
+            base_like_year_df = year_df.copy()
+            base_like_year_df["status_norm"] = "predicted"
+            base_like_year_df["quarter"] = base_like_year_df["fiscal_period"].apply(extract_quarter)
+            base_like_year_df["fiscal_year"] = base_like_year_df.apply(
+                lambda row: extract_fiscal_year(row["fiscal_period"], row["announcement_date"]),
+                axis=1
+            )
+            base_like_year_df["period_end"] = base_like_year_df.apply(
+                lambda row: get_period_end(row["fiscal_year"], row["quarter"]),
+                axis=1
+            )
+            base_like_year_df["lag_days"] = (
+                base_like_year_df["announcement_date"] - base_like_year_df["period_end"]
+            ).dt.days
+
+            working_base = pd.concat([working_base, base_like_year_df], ignore_index=True)
 
     if prediction_rows:
         return pd.concat(prediction_rows, ignore_index=True)
 
     return pd.DataFrame(columns=[
-        "company", "fiscal_period", "announcement_date", "status", "source",
-        "prediction_confidence", "prediction_basis"
+        "company",
+        "fiscal_period",
+        "announcement_date",
+        "status",
+        "source",
+        "prediction_confidence",
+        "prediction_basis",
     ])
 
 
 # =============================
 # 3) LOAD DATA
 # =============================
-earnings_df = load_earnings_data(str(EARNINGS_CSV_PATH))
-keywords_df = load_keywords(str(KEYWORDS_CSV_PATH))
-site_pool_df = load_site_pool(str(SITE_POOL_CSV_PATH))
-company_domain_df = load_company_domains(str(COMPANY_DOMAIN_CSV_PATH))
-predicted_df = generate_predictions(earnings_df, PREDICT_START_YEAR, PREDICT_END_YEAR)
+earnings_df = load_earnings_data(
+    str(EARNINGS_CSV_PATH),
+    get_file_mtime(EARNINGS_CSV_PATH),
+)
+
+keywords_df = load_keywords(
+    str(KEYWORDS_CSV_PATH),
+    get_file_mtime(KEYWORDS_CSV_PATH),
+)
+
+site_pool_df = load_site_pool(
+    str(SITE_POOL_CSV_PATH),
+    get_file_mtime(SITE_POOL_CSV_PATH),
+)
+
+company_domain_df = load_company_domains(
+    str(COMPANY_DOMAIN_CSV_PATH),
+    get_file_mtime(COMPANY_DOMAIN_CSV_PATH),
+)
+
+predicted_df = generate_predictions(
+    earnings_df,
+    PREDICT_START_YEAR,
+    PREDICT_END_YEAR,
+)
 
 
 # =============================
@@ -347,21 +442,65 @@ if st.sidebar.button("캐시 전체 삭제 후 새로고침"):
     st.rerun()
 
 today = date.today()
+
 year_options = list(range(2018, PREDICT_END_YEAR + 1))
 default_year_index = year_options.index(today.year) if today.year in year_options else len(year_options) - 1
 
-selected_year = st.sidebar.selectbox("Calendar Year", year_options, index=default_year_index)
-selected_month = st.sidebar.selectbox("Calendar Month", list(range(1, 13)), index=today.month - 1)
+selected_year = st.sidebar.selectbox(
+    "Calendar Year",
+    year_options,
+    index=default_year_index,
+)
+
+selected_month = st.sidebar.selectbox(
+    "Calendar Month",
+    list(range(1, 13)),
+    index=today.month - 1,
+)
 
 all_categories = ["All"] + sorted(keywords_df["분류"].dropna().unique().tolist()) if not keywords_df.empty else ["All"]
 all_companies = ["All"] + sorted(keywords_df["회사"].dropna().unique().tolist()) if not keywords_df.empty else ["All"]
 
-selected_categories = st.sidebar.multiselect("키워드 분류", all_categories, default=["All"])
-selected_companies = st.sidebar.multiselect("회사", all_companies, default=["All"])
-selected_priorities = st.sidebar.multiselect("사이트 우선순위", ["P1", "P2", "P3"], default=["P1", "P2"])
-max_sites_per_keyword = st.sidebar.slider("키워드당 최대 사이트 수", 1, 8, 4)
-max_queries = st.sidebar.slider("실제 뉴스 검색 쿼리 수", 10, 300, 60, step=10)
-days_back = st.sidebar.slider("뉴스 검색 기간(일)", 1, 90, 30)
+selected_categories = st.sidebar.multiselect(
+    "키워드 분류",
+    all_categories,
+    default=["All"],
+)
+
+selected_companies = st.sidebar.multiselect(
+    "회사",
+    all_companies,
+    default=["All"],
+)
+
+selected_priorities = st.sidebar.multiselect(
+    "사이트 우선순위",
+    ["P1", "P2", "P3"],
+    default=["P1", "P2"],
+)
+
+max_sites_per_keyword = st.sidebar.slider(
+    "키워드당 최대 사이트 수",
+    1,
+    8,
+    4,
+)
+
+max_queries = st.sidebar.slider(
+    "실제 뉴스 검색 쿼리 수",
+    10,
+    300,
+    60,
+    step=10,
+)
+
+days_back = st.sidebar.slider(
+    "뉴스 검색 기간(일)",
+    1,
+    90,
+    30,
+)
+
 
 # =============================
 # 5) BUILD QUERY TABLE + NEWS
@@ -388,13 +527,17 @@ if not keywords_df.empty and not site_pool_df.empty:
     )
 
     if not query_df.empty:
-        news_df = fetch_news_from_query_table(query_df.head(max_queries).copy(), days_back=days_back)
+        news_df = fetch_news_from_query_table(
+            query_df.head(max_queries).copy(),
+            days_back=days_back,
+        )
 
 
 # =============================
 # 6) SUMMARY METRICS
 # =============================
 m1, m2, m3, m4 = st.columns(4)
+
 m1.metric("키워드 수", f"{len(keywords_df):,}")
 m2.metric("검색 쿼리 수", f"{len(query_df):,}")
 m3.metric("뉴스 결과 행 수", f"{len(news_df):,}")
@@ -411,15 +554,37 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "실적 캘린더",
 ])
 
+
 with tab1:
     st.subheader("검색 쿼리")
+
     if query_df.empty:
         st.info("생성된 검색 쿼리가 없습니다.")
     else:
-        show_cols = [c for c in ["분류", "회사", "키워드", "키워드유형", "사이트명", "도메인", "우선순위", "pool_key", "뉴스검색가능", "검색쿼리"] if c in query_df.columns]
-        st.dataframe(query_df[show_cols], use_container_width=True, hide_index=True)
+        show_cols = [
+            c for c in [
+                "분류",
+                "회사",
+                "키워드",
+                "키워드유형",
+                "사이트명",
+                "도메인",
+                "우선순위",
+                "pool_key",
+                "뉴스검색가능",
+                "검색쿼리",
+            ]
+            if c in query_df.columns
+        ]
+
+        st.dataframe(
+            query_df[show_cols],
+            use_container_width=True,
+            hide_index=True,
+        )
 
         csv_bytes = query_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
         st.download_button(
             label="검색 쿼리 CSV 다운로드",
             data=csv_bytes,
@@ -427,22 +592,61 @@ with tab1:
             mime="text/csv",
         )
 
+
 with tab2:
     st.subheader("뉴스 결과")
+
     if news_df.empty:
         st.info("뉴스 결과가 없습니다.")
     else:
         if "수집상태" in news_df.columns:
-            status_count = news_df["수집상태"].value_counts(dropna=False).rename_axis("수집상태").reset_index(name="count")
-            st.dataframe(status_count, use_container_width=True, hide_index=True)
+            status_count = (
+                news_df["수집상태"]
+                .value_counts(dropna=False)
+                .rename_axis("수집상태")
+                .reset_index(name="count")
+            )
 
-        show_cols = [c for c in ["published_at", "분류", "회사", "키워드", "사이트명", "도메인", "title", "url", "source", "검색쿼리", "수집상태", "오류메시지"] if c in news_df.columns]
+            st.dataframe(
+                status_count,
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        show_cols = [
+            c for c in [
+                "published_at",
+                "분류",
+                "회사",
+                "키워드",
+                "사이트명",
+                "도메인",
+                "title",
+                "url",
+                "source",
+                "검색쿼리",
+                "수집상태",
+                "오류메시지",
+            ]
+            if c in news_df.columns
+        ]
+
         view_df = news_df.copy()
+
         if "published_at" in view_df.columns:
-            view_df["published_at"] = pd.to_datetime(view_df["published_at"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
-        st.dataframe(view_df[show_cols], use_container_width=True, hide_index=True)
+            view_df["published_at"] = (
+                pd.to_datetime(view_df["published_at"], errors="coerce")
+                .dt.strftime("%Y-%m-%d %H:%M")
+            )
+
+        st.dataframe(
+            view_df[show_cols],
+            use_container_width=True,
+            hide_index=True,
+        )
 
         csv_bytes = news_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
         st.download_button(
             label="뉴스 결과 CSV 다운로드",
             data=csv_bytes,
@@ -450,30 +654,45 @@ with tab2:
             mime="text/csv",
         )
 
+
 with tab3:
     st.subheader("사이트/도메인")
+
     c1, c2 = st.columns(2)
 
     with c1:
         st.markdown("site_pool_master.csv")
+
         if site_pool_df.empty:
             st.info("site_pool_master.csv가 없습니다.")
         else:
-            st.dataframe(site_pool_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                site_pool_df,
+                use_container_width=True,
+                hide_index=True,
+            )
 
     with c2:
         st.markdown("company_domains.csv")
+
         if company_domain_df.empty:
             st.info("company_domains.csv가 없습니다.")
         else:
-            st.dataframe(company_domain_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                company_domain_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+
 
 with tab4:
     st.subheader("실적 캘린더")
 
     frames = []
+
     if not earnings_df.empty:
         frames.append(earnings_df.copy())
+
     if not predicted_df.empty:
         frames.append(predicted_df.copy())
 
@@ -484,55 +703,134 @@ with tab4:
     if display_df.empty:
         st.info("earnings 발표일.CSV가 없거나 비어 있습니다.")
     else:
-        display_df["announcement_date"] = pd.to_datetime(display_df["announcement_date"], errors="coerce")
+        display_df["announcement_date"] = pd.to_datetime(
+            display_df["announcement_date"],
+            errors="coerce",
+        )
+
+        display_df = display_df.dropna(subset=["announcement_date"]).copy()
+
+        today_ts = pd.Timestamp(date.today())
+
+        display_df["status_lower"] = (
+            display_df["status"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+
+        # today 이전 predicted 일정은 달력/목록에서 제거
+        display_df = display_df[
+            ~(
+                (display_df["status_lower"].isin(["predicted", "prediction"])) &
+                (display_df["announcement_date"] < today_ts)
+            )
+        ].copy()
+
         filtered = display_df[
             (display_df["announcement_date"].dt.year == selected_year) &
             (display_df["announcement_date"].dt.month == selected_month)
         ].copy()
 
         event_map = {}
+
         for _, row in filtered.iterrows():
             d = row["announcement_date"].date()
             event_map.setdefault(d, []).append(row.to_dict())
 
-        st.markdown("""
-        <style>
-        .calendar-wrap { width: 100%; }
-        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-        .calendar-header {
-            background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 10px;
-            padding: 10px; text-align: center; font-weight: 700;
-        }
-        .calendar-cell {
-            min-height: 150px; border: 1px solid #d1d5db; border-radius: 12px;
-            padding: 8px; background: white;
-        }
-        .calendar-cell.other-month { background: #f9fafb; color: #9ca3af; }
-        .day-number { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
-        .event-box {
-            font-size: 12px; line-height: 1.3; padding: 6px 8px;
-            border-radius: 8px; margin-bottom: 6px; color: white; overflow: hidden;
-        }
-        .past { background: #2563eb; }
-        .confirmed { background: #059669; }
-        .predicted { background: #f59e0b; }
-        .planned { background: #6b7280; }
-        .unknown { background: #7c3aed; }
-        .event-meta { font-size: 11px; opacity: 0.9; }
-        </style>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            """
+            <style>
+            .calendar-wrap {
+                width: 100%;
+            }
+
+            .calendar-grid {
+                display: grid;
+                grid-template-columns: repeat(7, 1fr);
+                gap: 6px;
+            }
+
+            .calendar-header {
+                background: #f3f4f6;
+                border: 1px solid #d1d5db;
+                border-radius: 10px;
+                padding: 10px;
+                text-align: center;
+                font-weight: 700;
+            }
+
+            .calendar-cell {
+                min-height: 150px;
+                border: 1px solid #d1d5db;
+                border-radius: 12px;
+                padding: 8px;
+                background: white;
+            }
+
+            .calendar-cell.other-month {
+                background: #f9fafb;
+                color: #9ca3af;
+            }
+
+            .day-number {
+                font-size: 18px;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }
+
+            .event-box {
+                font-size: 12px;
+                line-height: 1.3;
+                padding: 6px 8px;
+                border-radius: 8px;
+                margin-bottom: 6px;
+                color: white;
+                overflow: hidden;
+            }
+
+            .past {
+                background: #2563eb;
+            }
+
+            .confirmed {
+                background: #059669;
+            }
+
+            .predicted {
+                background: #f59e0b;
+            }
+
+            .planned {
+                background: #6b7280;
+            }
+
+            .unknown {
+                background: #7c3aed;
+            }
+
+            .event-meta {
+                font-size: 11px;
+                opacity: 0.9;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
         cal = calendar.Calendar(firstweekday=0)
         weeks = cal.monthdatescalendar(selected_year, selected_month)
         weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
         calendar_html = '<div class="calendar-wrap"><div class="calendar-grid">'
+
         for wd in weekdays:
             calendar_html += f'<div class="calendar-header">{wd}</div>'
 
         for week in weeks:
             for day in week:
                 classes = "calendar-cell"
+
                 if day.month != selected_month:
                     classes += " other-month"
 
@@ -540,8 +838,16 @@ with tab4:
                 calendar_html += f'<div class="day-number">{day.day}</div>'
 
                 day_events = event_map.get(day, [])
+
                 for event in day_events[:3]:
                     status = str(event.get("status", "unknown")).strip().lower()
+
+                    if status in ["actual"]:
+                        status = "past"
+
+                    if status in ["prediction"]:
+                        status = "predicted"
+
                     if status not in ["past", "confirmed", "predicted", "planned"]:
                         status = "unknown"
 
@@ -549,6 +855,7 @@ with tab4:
                     source = html_lib.escape(str(event.get("source", "")))
                     confidence = html_lib.escape(str(event.get("prediction_confidence", "")))
                     fiscal_period = html_lib.escape(str(event.get("fiscal_period", "")))
+
                     meta_text = f"{source} ({confidence})" if confidence else source
 
                     calendar_html += (
@@ -560,19 +867,39 @@ with tab4:
                     )
 
                 if len(day_events) > 3:
-                    calendar_html += f'<div style="font-size:12px;color:#4b5563;">+{len(day_events)-3} more</div>'
+                    calendar_html += (
+                        f'<div style="font-size:12px;color:#4b5563;">'
+                        f'+{len(day_events) - 3} more'
+                        f'</div>'
+                    )
 
                 calendar_html += '</div>'
 
         calendar_html += '</div></div>'
+
         st.markdown(calendar_html, unsafe_allow_html=True)
 
         st.markdown("월간 이벤트 목록")
+
         show = filtered.sort_values("announcement_date").copy()
         show["announcement_date"] = show["announcement_date"].dt.strftime("%Y-%m-%d")
-        cols = ["announcement_date", "company", "fiscal_period", "status", "source"]
+
+        cols = [
+            "announcement_date",
+            "company",
+            "fiscal_period",
+            "status",
+            "source",
+        ]
+
         if "prediction_confidence" in show.columns:
             cols.append("prediction_confidence")
+
         if "prediction_basis" in show.columns:
             cols.append("prediction_basis")
-        st.dataframe(show[cols], use_container_width=True, hide_index=True)
+
+        st.dataframe(
+            show[cols],
+            use_container_width=True,
+            hide_index=True,
+        )
